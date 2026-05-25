@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # ==========================================
   # SERVICIUL 1: Backend-ul Clasic (FastAPI)
@@ -8,7 +6,6 @@ services:
     platform: linux/amd64
     build: .
     container_name: ml_fastapi_backend
-    # Pornim main.py cu Uvicorn
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
@@ -21,8 +18,27 @@ services:
     platform: linux/amd64
     build: .
     container_name: ml_mcp_server
-    # Pornim mcp_server.py folosind protocolul SSE ca să poată comunica prin rețea
     command: fastmcp run mcp_server.py --transport sse --port 8001
     ports:
       - "8001:8001"
     restart: unless-stopped
+
+  # ==========================================
+  # SERVICIUL 3: Interfața (OpenWebUI)
+  # ==========================================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open_webui_client
+    ports:
+      - "3000:8080"
+    environment:
+      - WEBUI_AUTH=false
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/app/backend/data
+    restart: unless-stopped
+
+volumes:
+  open-webui-data:
