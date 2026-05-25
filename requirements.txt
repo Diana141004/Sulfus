@@ -1,0 +1,9 @@
+pandas==3.0.3
+numpy==2.4.6
+scikit-learn==1.8.0
+xgboost==3.2.0
+catboost==1.2.10
+joblib==1.5.3
+tensorflow==2.21.0
+matplotlib==3.10.9
+plotly==6.7.0

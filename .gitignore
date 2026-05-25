@@ -1,0 +1,30 @@
+# Virtual environments
+.env/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+.antigravitycli/
+catboost_info/
+
+# Duplicate model files (pastram doar .joblib si .cbm/.keras)
+models/*.pkl
+models/*.zip
+
+# Backup files
+train copy.py
+
+# Datasets irelevante
+laptop Price Prediction Dataset.csv
