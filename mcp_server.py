@@ -22,32 +22,15 @@ import os
 mcp = FastMCP(
     "Telecom Payment Delay Predictor",
     instructions="Server MCP pentru predicția întârzierilor de plată în telecomunicații. "
-                 "Folosește un model XGBoost fine-tuned cu F1=85.9%. "
+                 "Folosește un model XGBoost fine-tuned cu threshold optimizat pe OOF (fără data leakage). "
                  "Apelează tool-ul predict_payment_delay cu datele unui client pentru a obține predicția."
 )
 
-# Încărcare model + threshold-uri la startup
+# Încărcare model + preprocessor + threshold-uri la startup
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 model = joblib.load(os.path.join(MODEL_DIR, "model_xgb_tuned.joblib"))
+preprocessor = joblib.load(os.path.join(MODEL_DIR, "preprocessor.joblib"))
 thresholds = joblib.load(os.path.join(MODEL_DIR, "xgb_thresholds.joblib"))
-
-# Coloanele exacte pe care modelul le așteaptă (69 features, one-hot encoded)
-MODEL_COLUMNS = [
-    'account_length', 'number_vmail_messages', 'total_day_minutes', 'total_day_calls',
-    'total_eve_minutes', 'total_eve_calls', 'total_night_minutes', 'total_night_calls',
-    'total_intl_minutes', 'total_intl_calls', 'number_customer_service_calls',
-    'state_AK', 'state_AL', 'state_AR', 'state_AZ', 'state_CA', 'state_CO',
-    'state_CT', 'state_DC', 'state_DE', 'state_FL', 'state_GA', 'state_HI',
-    'state_IA', 'state_ID', 'state_IL', 'state_IN', 'state_KS', 'state_KY',
-    'state_LA', 'state_MA', 'state_MD', 'state_ME', 'state_MI', 'state_MN',
-    'state_MO', 'state_MS', 'state_MT', 'state_NC', 'state_ND', 'state_NE',
-    'state_NH', 'state_NJ', 'state_NM', 'state_NV', 'state_NY', 'state_OH',
-    'state_OK', 'state_OR', 'state_PA', 'state_RI', 'state_SC', 'state_SD',
-    'state_TN', 'state_TX', 'state_UT', 'state_VA', 'state_VT', 'state_WA',
-    'state_WI', 'state_WV', 'state_WY', 'area_code_area_code_408',
-    'area_code_area_code_415', 'area_code_area_code_510', 'international_plan_no',
-    'international_plan_yes', 'voice_mail_plan_no', 'voice_mail_plan_yes'
-]
 
 
 # ===========================================================================
@@ -75,9 +58,9 @@ def predict_payment_delay(
     """
     Predicție dacă un client telecom va întârzia plata.
 
-    Modelul folosit: XGBoost Tuned (F1=85.9%, AUC=92.77%).
-    Threshold-ul implicit (best_f1=0.768) maximizează F1-score.
-    Alternativ, threshold_mode='high_recall' (0.6843) asigură Recall >= 85%.
+    Modelul folosit: XGBoost Tuned (F1=85.35%, AUC=92.77%).
+    Threshold calculat pe Out-of-Fold predictions (fără data leakage).
+    threshold_mode='best_f1' maximizează F1-score, 'high_recall' asigură Recall >= 85%.
 
     Args:
         state: Statul clientului (ex: 'OH', 'CA', 'NY')
@@ -100,10 +83,10 @@ def predict_payment_delay(
     Returns:
         Dict cu predicția, probabilitatea și interpretarea.
     """
-    # Selectare threshold
+    # Selectare threshold din fișierul salvat
     th = thresholds.get(threshold_mode, thresholds['best_f1'])
 
-    # Construire DataFrame cu datele clientului
+    # Construire DataFrame cu datele clientului (identic cu train.py)
     data = {
         'account_length': [account_length],
         'number_vmail_messages': [number_vmail_messages],
@@ -124,15 +107,18 @@ def predict_payment_delay(
 
     df_input = pd.DataFrame(data)
 
-    # One-Hot Encoding (identic cu antrenarea)
+    # Asigurăm tipurile categoriale (identic cu train.py)
     categorical_features = ['state', 'area_code', 'international_plan', 'voice_mail_plan']
-    df_input = pd.get_dummies(df_input, columns=categorical_features)
+    for c in categorical_features:
+        if c in df_input.columns:
+            df_input[c] = df_input[c].astype(str)
 
-    # Aliniere coloane cu modelul (coloane lipsă = 0)
-    df_input = df_input.reindex(columns=MODEL_COLUMNS, fill_value=0).astype(float)
+    # Aplicăm preprocessorul salvat (StandardScaler + OneHotEncoder)
+    # Același ColumnTransformer folosit la antrenare — fără discrepanțe
+    X_processed = preprocessor.transform(df_input)
 
-    # Predicție cu threshold optimizat
-    probability = float(model.predict_proba(df_input)[:, 1][0])
+    # Predicție cu threshold optimizat (calculat pe OOF)
+    probability = float(model.predict_proba(X_processed)[:, 1][0])
     prediction = int(probability >= th)
 
     return {
@@ -142,7 +128,8 @@ def predict_payment_delay(
         "threshold_mode": threshold_mode,
         "description": "Clientul RISCĂ întârziere la plată" if prediction == 1
                        else "Clientul NU riscă întârziere la plată",
-        "model": "XGBoost Tuned (F1=85.9%, Precision=91.78%, Recall=80.72%)"
+        "model": "XGBoost Tuned (F1=85.35%, Precision=90.54%, Recall=80.72%)",
+        "threshold_method": "Out-of-Fold (no data leakage)"
     }
 
 
@@ -184,9 +171,10 @@ Payment delay = NO: {delay_no} ({100-rate:.1f}%)
 
 🏆 Model utilizat: XGBoost Tuned
 - AUC: 92.77%
-- F1: 85.90% (threshold=0.768)
-- Precision: 91.78%
+- F1: 85.35% (threshold OOF = {thresholds['best_f1']:.4f})
+- Precision: 90.54%
 - Recall: 80.72%
+- Threshold method: Out-of-Fold (no data leakage)
 """
     return stats
 
@@ -231,14 +219,15 @@ def interpret_prediction(probability: str, prediction: str, customer_info: str) 
     """
     pred_label = "VA ÎNTÂRZIA plata" if prediction == "1" else "NU VA ÎNTÂRZIA plata"
     prob_pct = float(probability) * 100
+    th = thresholds['best_f1']
 
     return f"""Ești un analist de date specializat în telecomunicații. Analizează următorul rezultat:
 
 ## Rezultat Predicție ML
 - **Decizie model**: {pred_label}
 - **Probabilitate**: {prob_pct:.1f}%
-- **Threshold folosit**: 76.8% (optimizat pentru F1-score maxim)
-- **Model**: XGBoost Tuned (F1=85.9%, Precision=91.78%)
+- **Threshold folosit**: {th*100:.1f}% (optimizat pe Out-of-Fold, fără data leakage)
+- **Model**: XGBoost Tuned (F1=85.35%, Precision=90.54%)
 
 ## Date Client
 {customer_info}

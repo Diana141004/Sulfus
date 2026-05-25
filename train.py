@@ -5,8 +5,8 @@ Pipeline de antrenare și comparare modele ML pentru predicția payment_delay
 Modele comparate: Logistic Regression, SVM, Random Forest, XGBoost (+ fine-tuned),
 CatBoost, CNN 1D.
 
-Cel mai bun model: XGBoost Tuned (F1=85.9%, Recall=80.72%, Precision=91.78%)
-Threshold-uri optime gasite prin Precision-Recall curve analysis.
+Cel mai bun model: XGBoost Tuned — threshold optimizat pe Out-of-Fold predictions
+(fără data leakage pe test set).
 """
 
 import pandas as pd
@@ -47,11 +47,10 @@ except ImportError:
     HAS_TF = False
 
 # ============================================================================
-# THRESHOLD-URI OPTIME (gasite prin fine-tuning automat pe Precision-Recall curve)
-# Folosite pentru inferenta cu modelul XGBoost Tuned
+# THRESHOLD-URI OPTIME — se recalculează la fiecare antrenare prin OOF
+# Valorile de mai jos sunt placeholder-uri actualizate la ultima rulare.
+# La inferență, se încarcă din models/xgb_thresholds.joblib
 # ============================================================================
-BEST_THRESHOLD_F1 = 0.768        # Maximizeaza F1-score
-BEST_THRESHOLD_HIGH_RECALL = 0.6843  # Recall >= 85% cu Precision maxima
 
 
 def create_cnn_model(input_dim):
@@ -190,9 +189,9 @@ def main():
     results['XGBoost'] = evaluate_model(xgb_default, X_test_processed, y_test)
 
     # =========================================================================
-    # 7. XGBOOST FINE-TUNED (RandomizedSearchCV + Threshold Optimization)
+    # 7. XGBOOST FINE-TUNED (RandomizedSearchCV + OOF Threshold Optimization)
     # =========================================================================
-    print("===> 7. Fine-tuning XGBoost (RandomizedSearchCV + Threshold Tuning)...")
+    print("===> 7. Fine-tuning XGBoost (RandomizedSearchCV + OOF Threshold Tuning)...")
 
     param_distributions = {
         'n_estimators': [100, 200, 300, 500, 700],
@@ -222,31 +221,54 @@ def main():
     )
 
     search.fit(X_train_processed, y_train)
-    xgb_tuned = search.best_estimator_
+    best_params = search.best_params_
 
     print(f"    Best CV Recall: {search.best_score_:.4f}")
-    print(f"    Best params: {search.best_params_}")
+    print(f"    Best params: {best_params}")
 
-    # Threshold tuning pe curba Precision-Recall
-    y_prob_tuned = xgb_tuned.predict_proba(X_test_processed)[:, 1]
-    precisions, recalls, thresholds = precision_recall_curve(y_test, y_prob_tuned)
+    # -------------------------------------------------------------------------
+    # THRESHOLD TUNING PE OUT-OF-FOLD PREDICTIONS (fara data leakage!)
+    # Antrenam modelul pe fiecare fold si colectam probabilitatile pe validare
+    # -------------------------------------------------------------------------
+    print("    Calculare threshold optim pe Out-of-Fold predictions...")
+    oof_probs = np.zeros(len(y_train))
+    y_train_arr = y_train.values if hasattr(y_train, 'values') else np.array(y_train)
 
-    # Threshold care maximizeaza F1
-    f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-8)
-    best_f1_idx = np.argmax(f1_scores)
-    best_threshold_f1 = thresholds[best_f1_idx] if best_f1_idx < len(thresholds) else 0.5
+    for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X_train_processed, y_train_arr)):
+        fold_model = XGBClassifier(**best_params, random_state=42, eval_metric='logloss')
+        fold_model.fit(X_train_processed[train_idx], y_train_arr[train_idx])
+        oof_probs[val_idx] = fold_model.predict_proba(X_train_processed[val_idx])[:, 1]
 
-    # Threshold care asigura Recall >= 85% cu Precision maxima
+    # Threshold tuning pe curba Precision-Recall din OOF (nu din test!)
+    precisions_oof, recalls_oof, thresholds_oof = precision_recall_curve(y_train_arr, oof_probs)
+
+    # Threshold care maximizeaza F1 (pe OOF)
+    f1_scores_oof = 2 * (precisions_oof * recalls_oof) / (precisions_oof + recalls_oof + 1e-8)
+    best_f1_idx = np.argmax(f1_scores_oof)
+    best_threshold_f1 = thresholds_oof[best_f1_idx] if best_f1_idx < len(thresholds_oof) else 0.5
+
+    # Threshold care asigura Recall >= 85% cu F1 maxim (pe OOF)
     target_recall = 0.85
-    valid_mask = recalls[:-1] >= target_recall
+    valid_mask = recalls_oof[:-1] >= target_recall
     if valid_mask.any():
-        candidates_f1 = f1_scores[:-1][valid_mask]
+        candidates_f1 = f1_scores_oof[:-1][valid_mask]
         best_candidate_idx = np.where(valid_mask)[0][np.argmax(candidates_f1)]
-        best_threshold_recall = thresholds[best_candidate_idx]
+        best_threshold_recall = thresholds_oof[best_candidate_idx]
     else:
         best_threshold_recall = best_threshold_f1
 
-    # Evaluare cu threshold optimizat pentru F1
+    print(f"    OOF Threshold best F1:     {best_threshold_f1:.4f}")
+    print(f"    OOF Threshold high Recall: {best_threshold_recall:.4f}")
+
+    # -------------------------------------------------------------------------
+    # Antrenam modelul FINAL pe tot train-ul cu best_params
+    # -------------------------------------------------------------------------
+    xgb_tuned = XGBClassifier(**best_params, random_state=42, eval_metric='logloss')
+    xgb_tuned.fit(X_train_processed, y_train_arr)
+
+    # Evaluare pe TEST cu threshold-urile gasite pe OOF (evaluare nebiased)
+    y_prob_tuned = xgb_tuned.predict_proba(X_test_processed)[:, 1]
+
     y_pred_f1 = (y_prob_tuned >= best_threshold_f1).astype(int)
     results['XGBoost Tuned (best F1)'] = {
         'AUC': float(roc_auc_score(y_test, y_prob_tuned)),
@@ -256,7 +278,6 @@ def main():
         'Threshold': float(best_threshold_f1)
     }
 
-    # Evaluare cu threshold optimizat pentru Recall ridicat
     y_pred_recall = (y_prob_tuned >= best_threshold_recall).astype(int)
     results['XGBoost Tuned (high Recall)'] = {
         'AUC': float(roc_auc_score(y_test, y_prob_tuned)),
@@ -266,13 +287,13 @@ def main():
         'Threshold': float(best_threshold_recall)
     }
 
-    print(f"    Threshold best F1:     {best_threshold_f1:.4f} -> F1={f1_score(y_test, y_pred_f1):.4f}")
-    print(f"    Threshold high Recall: {best_threshold_recall:.4f} -> F1={f1_score(y_test, y_pred_recall):.4f}")
+    print(f"    [TEST] Threshold best F1:     {best_threshold_f1:.4f} -> F1={f1_score(y_test, y_pred_f1):.4f}, Recall={recall_score(y_test, y_pred_f1):.4f}, Prec={precision_score(y_test, y_pred_f1):.4f}")
+    print(f"    [TEST] Threshold high Recall: {best_threshold_recall:.4f} -> F1={f1_score(y_test, y_pred_recall):.4f}, Recall={recall_score(y_test, y_pred_recall):.4f}, Prec={precision_score(y_test, y_pred_recall):.4f}")
 
     # Salvare model si threshold-uri
     joblib.dump(xgb_tuned, 'models/model_xgb_tuned.joblib')
     joblib.dump(
-        {'best_f1': best_threshold_f1, 'high_recall': best_threshold_recall},
+        {'best_f1': float(best_threshold_f1), 'high_recall': float(best_threshold_recall)},
         'models/xgb_thresholds.joblib'
     )
     print("    Model salvat: models/model_xgb_tuned.joblib")
@@ -364,8 +385,9 @@ def main():
     print("=" * 60)
     print("\nToate modelele au fost salvate in folderul 'models/'.")
     print(f"\n*** BEST MODEL: XGBoost Tuned ***")
-    print(f"    Threshold F1 optim:     {BEST_THRESHOLD_F1}")
-    print(f"    Threshold Recall optim: {BEST_THRESHOLD_HIGH_RECALL}")
+    print(f"    Threshold F1 optim (OOF):     {best_threshold_f1:.4f}")
+    print(f"    Threshold Recall optim (OOF): {best_threshold_recall:.4f}")
+    print("    (Threshold-uri calculate pe Out-of-Fold predictions, fara data leakage)")
 
 
 if __name__ == "__main__":
