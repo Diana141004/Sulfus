@@ -20,7 +20,6 @@ Thumbs.db
 catboost_info/
 
 # Duplicate model files (pastram doar .joblib si .cbm/.keras)
-models/*.pkl
 models/*.zip
 
 # Backup files
