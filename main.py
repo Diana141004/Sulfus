@@ -7,7 +7,7 @@ app = FastAPI(title="ML Prediction API", description="API pentru inferență mod
 
 # === PARTEA 1: ÎNCĂRCAREA MODELULUI REAL ===
 try:
-    model = joblib.load("model_xgb_tuned.pkl")
+    model = joblib.load("models/model_xgb_tuned.joblib")
     print("✅ Modelul a fost încărcat cu succes!")
 except Exception as e:
     print(f"⚠️ Eroare critică la încărcarea modelului: {e}")
@@ -87,16 +87,27 @@ async def face_predictie(data: InputData):
         # 5. Asigurăm tipurile corecte (bool -> int pentru XGBoost)
         df_input = df_input.astype(float)
 
-        # 6. Trimitem datele către model pentru predicție
-        predictie = model.predict(df_input)
-        th = 0.7680
-        pred = (predictie >= th).astype(int)
-        rezultat_final = str(pred[0])
+        # 6. Trimitem datele către model pentru predicție cu threshold optimizat
+        THRESHOLD = 0.768  # Optimizat pe curba Precision-Recall (maximizează F1)
+        prob = float(model.predict_proba(df_input)[:, 1][0])
+        prediction = int(prob >= THRESHOLD)
 
         return {
-            "status": "success",
-            "prediction": rezultat_final,
-            "interpretation": "Clientul RISCĂ întârziere la plată" if rezultat_final == "yes" else "Clientul NU riscă întârziere la plată"
+            "prediction": {
+                "label": "payment_delay",
+                "value": prediction,
+                "description": "Clientul RISCĂ întârziere la plată" if prediction == 1 else "Clientul NU riscă întârziere la plată"
+            },
+            "confidence": {
+                "probability": round(prob, 4),
+                "threshold_used": THRESHOLD,
+                "threshold_mode": "best_f1"
+            },
+            "model_info": {
+                "name": "XGBoost Tuned",
+                "version": "1.0",
+                "metrics": {"f1": 0.859, "precision": 0.9178, "recall": 0.8072}
+            }
         }
 
     except Exception as e:

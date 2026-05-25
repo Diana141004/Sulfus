@@ -6,7 +6,9 @@ Proiect de Machine Learning pentru predicția întârzierilor de plată ale clie
 
 Clasificare binară: **va întârzia clientul plata?** (`payment_delay`: yes/no)
 
-## 📊 Rezultate
+---
+
+## 📊 Rezultate (Partea 1 – Antrenare)
 
 | Model | AUC | F1 | Recall | Precision | Threshold |
 |-------|-----|-----|--------|-----------|-----------|
@@ -21,16 +23,85 @@ Clasificare binară: **va întârzia clientul plata?** (`payment_delay`: yes/no)
 
 **🏆 Best model: XGBoost Tuned** – optimizat cu RandomizedSearchCV (80 iterații, 5-fold CV) + threshold tuning pe curba Precision-Recall.
 
+---
+
+## 🚀 Partea 2 – FastAPI (Inferență)
+
+### Rulare server
+```bash
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### Endpoints
+
+| Metoda | Endpoint | Descriere |
+|--------|----------|-----------|
+| GET | `/` | Health check simplu |
+| GET | `/health` | Status server + model loaded |
+| POST | `/predict` | **Predicție payment delay** |
+| GET | `/docs` | Swagger UI (documentație interactivă) |
+
+### Exemplu Request (POST /predict)
+```json
+{
+    "state": "OH",
+    "account_length": 107,
+    "area_code": "area_code_415",
+    "international_plan": "no",
+    "voice_mail_plan": "yes",
+    "number_vmail_messages": 26,
+    "total_day_minutes": 161.6,
+    "total_day_calls": 123,
+    "total_day_charge": 27.47,
+    "total_eve_minutes": 195.5,
+    "total_eve_calls": 103,
+    "total_eve_charge": 16.62,
+    "total_night_minutes": 254.4,
+    "total_night_calls": 103,
+    "total_night_charge": 11.45,
+    "total_intl_minutes": 13.7,
+    "total_intl_calls": 3,
+    "total_intl_charge": 3.7,
+    "number_customer_service_calls": 1
+}
+```
+
+### Exemplu Response
+```json
+{
+    "prediction": {
+        "label": "payment_delay",
+        "value": 0,
+        "description": "Clientul NU riscă întârziere la plată"
+    },
+    "confidence": {
+        "probability": 0.1234,
+        "threshold_used": 0.768,
+        "threshold_mode": "best_f1"
+    },
+    "model_info": {
+        "name": "XGBoost Tuned",
+        "version": "1.0",
+        "metrics": {"f1": 0.859, "precision": 0.9178, "recall": 0.8072}
+    }
+}
+```
+
+---
+
 ## 🛠️ Tehnologii
 
 - **Python 3.10+**
+- FastAPI + Uvicorn
 - scikit-learn, XGBoost, CatBoost, TensorFlow/Keras
 - Pandas, NumPy
 
 ## 📁 Structura proiectului
 
 ```
-├── train.py                    # Pipeline complet de antrenare
+├── train.py                    # Partea 1: Pipeline complet de antrenare
+├── main.py                     # Partea 2: FastAPI server pentru inferență
 ├── telecomunicatii.csv         # Dataset (3333 clienți, 20 features)
 ├── requirements.txt            # Dependințe Python
 ├── .gitignore
@@ -48,35 +119,7 @@ Clasificare binară: **va întârzia clientul plata?** (`payment_delay`: yes/no)
 └── README.md
 ```
 
-## 🚀 Utilizare
-
-### Instalare dependințe
-```bash
-pip install -r requirements.txt
-```
-
-### Antrenare (reproduce toate modelele)
-```bash
-python train.py
-```
-
-### Inferență cu modelul optim
-```python
-import joblib
-import numpy as np
-
-# Încărcare model și preprocesor
-model = joblib.load('models/model_xgb_tuned.joblib')
-preprocessor = joblib.load('models/preprocessor.joblib')
-thresholds = joblib.load('models/xgb_thresholds.joblib')
-
-# Preprocesare date noi
-X_new_processed = preprocessor.transform(X_new)
-
-# Predicție cu threshold optimizat pentru F1
-probabilities = model.predict_proba(X_new_processed)[:, 1]
-predictions = (probabilities >= thresholds['best_f1']).astype(int)
-```
+---
 
 ## 📝 Metodologie
 
@@ -93,3 +136,9 @@ predictions = (probabilities >= thresholds['best_f1']).astype(int)
 BEST_THRESHOLD_F1 = 0.768          # F1=85.9%, Recall=80.72%, Precision=91.78%
 BEST_THRESHOLD_HIGH_RECALL = 0.6843  # F1=84.02%, Recall=85.54%, Precision=82.56%
 ```
+
+---
+
+## 👥 Echipa
+
+Proiect dezvoltat pentru procesul de selecție internship.
