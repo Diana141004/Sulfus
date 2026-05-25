@@ -90,10 +90,55 @@ uvicorn main:app --reload --port 8000
 
 ---
 
+## 🤖 Partea 3 – FastMCP (Server MCP)
+
+Modelul ML este expus ca **Tool MCP** apelabil dinamic de un LLM (Claude, GPT, etc.) prin protocolul Model Context Protocol.
+
+### Rulare server MCP
+```bash
+pip install fastmcp
+python mcp_server.py                          # stdio (pentru Claude Desktop)
+fastmcp dev inspector mcp_server.py           # inspector web (dezvoltare)
+```
+
+### Componente MCP
+
+| Tip | Nume | Descriere |
+|-----|------|-----------|
+| **Tool** | `predict_payment_delay` | Predicție payment delay cu threshold optimizat |
+| Resource | `stats://dataset` | Statistici generale despre dataset |
+| Resource | `stats://model-comparison` | Tabel comparare toate modelele |
+| Prompt | `interpret_prediction` | Template LLM pentru interpretare rezultat |
+| Prompt | `analyze_customer` | Template rapid analiză client |
+
+### Exemplu apel Tool (de către un LLM)
+```
+"Analizează acest client: stat OH, 161 minute/zi, 1 apel customer service, fără plan internațional. Va întârzia plata?"
+```
+
+LLM-ul apelează automat `predict_payment_delay` și primește:
+```json
+{
+    "prediction": 0,
+    "probability": 0.7228,
+    "threshold_used": 0.768,
+    "threshold_mode": "best_f1",
+    "description": "Clientul NU riscă întârziere la plată"
+}
+```
+
+### Verificare funcționare
+```bash
+fastmcp list mcp_server.py    # listează tool-urile disponibile
+```
+
+---
+
 ## 🛠️ Tehnologii
 
 - **Python 3.10+**
 - FastAPI + Uvicorn
+- FastMCP (Model Context Protocol)
 - scikit-learn, XGBoost, CatBoost, TensorFlow/Keras
 - Pandas, NumPy
 
