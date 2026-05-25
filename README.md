@@ -147,6 +147,7 @@ fastmcp list mcp_server.py    # listează tool-urile disponibile
 ```
 ├── train.py                    # Partea 1: Pipeline complet de antrenare
 ├── main.py                     # Partea 2: FastAPI server pentru inferență
+├── mcp_server.py               # Partea 3: Server FastMCP (Tool MCP)
 ├── telecomunicatii.csv         # Dataset (3333 clienți, 20 features)
 ├── requirements.txt            # Dependințe Python
 ├── .gitignore
