@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  # ==========================================
+  # SERVICIUL 1: Backend-ul Clasic (FastAPI)
+  # ==========================================
+  telecom-api:
+    platform: linux/amd64
+    build: .
+    container_name: ml_fastapi_backend
+    # Pornim main.py cu Uvicorn
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # ==========================================
+  # SERVICIUL 2: Serverul AI (FastMCP)
+  # ==========================================
+  telecom-mcp:
+    platform: linux/amd64
+    build: .
+    container_name: ml_mcp_server
+    # Pornim mcp_server.py folosind protocolul SSE ca să poată comunica prin rețea
+    command: fastmcp run mcp_server.py --transport sse --port 8001
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
